@@ -1,78 +1,73 @@
 #ifndef TYPELIST_H
 #define TYPELIST_H
 
-#include <type_traits>
 #include <cstddef>
+#include <type_traits>
+#include <limits>
 
-namespace tl {
+namespace typelist {
 
 template <typename... Ts>
 struct TypeList {};
 
-// Получение элемента по индексу
-template <typename List, size_t Index>
-struct TypeAt;
+template <std::size_t I, typename List>
+struct Get;
 
-template <typename Head, typename... Tail>
-struct TypeAt<TypeList<Head, Tail...>, 0> {
-    using type = Head;
+// Специализация: элемент 0
+template <typename T, typename... Ts>
+struct Get<0, TypeList<T, Ts...>> {
+    using type = T;
 };
 
-template <size_t Index, typename Head, typename... Tail>
-struct TypeAt<TypeList<Head, Tail...>, Index> {
-    using type = typename TypeAt<TypeList<Tail...>, Index - 1>::type;
+// Рекурсивный шаг
+template <std::size_t I, typename T, typename... Ts>
+struct Get<I, TypeList<T, Ts...>> : Get<I - 1, TypeList<Ts...>> {};
+
+// Ошибка компиляции при выходе за границы
+template <std::size_t I>
+struct Get<I, TypeList<>> {
+    static_assert(I != I, "typelist::Get: index out of bounds of list");
 };
 
-// Размер списка
 template <typename List>
 struct Size;
 
 template <typename... Ts>
-struct Size<TypeList<Ts...>> {
-    static constexpr size_t value = sizeof...(Ts);
-};
+struct Size<TypeList<Ts...>> : std::integral_constant<std::size_t, sizeof...(Ts)> {};
 
-// Проверка наличия типа
 template <typename List, typename T>
 struct Contains;
 
 template <typename T>
-struct Contains<TypeList<>, T> {
-    static constexpr bool value = false;
-};
+struct Contains<TypeList<>, T> : std::false_type {};
 
-template <typename Head, typename... Tail, typename T>
-struct Contains<TypeList<Head, Tail...>, T> {
-    static constexpr bool value =
-        std::is_same_v<Head, T> || Contains<TypeList<Tail...>, T>::value;
-};
+template <typename U, typename... Us, typename T>
+struct Contains<TypeList<U, Us...>, T>
+    : std::conditional_t< std::is_same_v<U, T>,
+                        std::true_type,
+                        Contains<TypeList<Us...>, T> > {};
 
-// Поиск индекса типа
-template <typename List, typename T, size_t Index = 0>
+// IndexOf: индекс первого вхождения T или max() если нет
+template <typename List, typename T>
 struct IndexOf;
 
-// Ошибка: тип не найден
-template <typename T, size_t Index>
-struct IndexOf<TypeList<>, T, Index> {
-    static_assert(!std::is_same_v<T, T>, "Type not found in TypeList");
-};
+template <typename T>
+struct IndexOf<TypeList<>, T>
+    : std::integral_constant<std::size_t, std::numeric_limits<std::size_t>::max()> {};
 
-// Спец. случай: нашли Head == T
-template <typename Head, typename... Tail, typename T, size_t Index>
-requires std::is_same_v<Head, T>
-struct IndexOf<TypeList<Head, Tail...>, T, Index> {
-    static constexpr size_t value = Index;
-};
+template <typename U, typename... Us, typename T>
+struct IndexOf<TypeList<U, Us...>, T>
+    : std::conditional_t< std::is_same_v<U, T>,
+        std::integral_constant<std::size_t, 0>,
+        std::integral_constant<
+            std::size_t,
+            (Contains<TypeList<Us...>, T>::value
+                ? 1 + IndexOf<TypeList<Us...>, T>::value
+                : std::numeric_limits<std::size_t>::max())
+        >
+      > {};
 
-// Рекурсивный случай: не нашли в Head, ищем дальше
-template <typename Head, typename... Tail, typename T, size_t Index>
-requires (!std::is_same_v<Head, T>)
-struct IndexOf<TypeList<Head, Tail...>, T, Index> {
-    static constexpr size_t value =
-        IndexOf<TypeList<Tail...>, T, Index + 1>::value;
-};
-
-// Добавление в конец
+// Append: добавление типа T в конец списка
 template <typename List, typename T>
 struct Append;
 
@@ -81,7 +76,7 @@ struct Append<TypeList<Ts...>, T> {
     using type = TypeList<Ts..., T>;
 };
 
-// Добавление в начало
+// Prepend: добавление типа T в начало списка
 template <typename List, typename T>
 struct Prepend;
 
@@ -90,6 +85,30 @@ struct Prepend<TypeList<Ts...>, T> {
     using type = TypeList<T, Ts...>;
 };
 
-} // namespace tl
+// Получить тип по индексу: GetType<List, I>
+template <typename List, std::size_t I>
+using GetType = typename Get<I, List>::type;
+
+// Размер списка: size_v<List>
+template <typename List>
+inline constexpr std::size_t size_v = Size<List>::value;
+
+// Проверка наличия типа: contains_v<List, T>
+template <typename List, typename T>
+inline constexpr bool contains_v = Contains<List, T>::value;
+
+// Индекс типа: index_of_v<List, T>
+template <typename List, typename T>
+inline constexpr std::size_t index_of_v = IndexOf<List, T>::value;
+
+// Добавить тип в конец: append_t<List, T>
+template <typename List, typename T>
+using append_t = typename Append<List, T>::type;
+
+// Добавить тип в начало: prepend_t<List, T>
+template <typename List, typename T>
+using prepend_t = typename Prepend<List, T>::type;
+
+} // namespace TypeList
 
 #endif // TYPELIST_H
